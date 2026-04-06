@@ -14,7 +14,7 @@
  * openclaw.send_message service plus openclaw_message_received events.
  */
 
-const CARD_VERSION = "0.3.16";
+const CARD_VERSION = "0.3.17";
 
 // Max time (ms) to show the thinking indicator before falling back to an error (default; overridable via card config `thinking_timeout` in seconds)
 const THINKING_TIMEOUT_MS = 120_000;
@@ -479,6 +479,13 @@ class OpenClawChatCard extends HTMLElement {
         this._assistTextStreamingAvailable =
           !!openClawPipeline &&
           openClawConversationEngines.includes(preferredPipeline?.conversation_engine);
+        console.debug("OpenClaw card: pipeline settings loaded", {
+          preferredPipelineId,
+          selectedPipelineId: this._preferredAssistPipelineId,
+          selectedConversationEngine: preferredPipeline?.conversation_engine || null,
+          openClawConversationEngines,
+          assistTextStreamingAvailable: this._assistTextStreamingAvailable,
+        });
         const discoveredTtsEngines = pipelines
           .map((pipeline) => pipeline?.tts_engine)
           .filter((engine) => typeof engine === "string" && engine.trim().length > 0)
@@ -637,6 +644,11 @@ class OpenClawChatCard extends HTMLElement {
             return;
           }
 
+          console.debug("OpenClaw card: Assist pipeline event", {
+            eventType,
+            eventData,
+          });
+
           if (eventType === "intent-progress") {
             const delta = eventData?.chat_log_delta;
             if (!delta || typeof delta.content !== "string" || !delta.content.length) {
@@ -695,10 +707,7 @@ class OpenClawChatCard extends HTMLElement {
 
   async _sendMessage(text, source = null) {
     if (!text || !text.trim() || !this._hass) return;
-
-    if (!this._preferredAssistPipelineId) {
-      await this._loadIntegrationSettings(true);
-    }
+    await this._loadIntegrationSettings(true);
 
     const message = text.trim();
     this._addMessage("user", message);
@@ -719,6 +728,13 @@ class OpenClawChatCard extends HTMLElement {
     this._scrollToBottom();
 
     const useAssistPipeline = this._canUseAssistPipelineTextStreaming();
+    console.debug("OpenClaw card: send path selected", {
+      useAssistPipeline,
+      preferredAssistPipelineId: this._preferredAssistPipelineId,
+      openClawConversationEntityId: this._openclawConversationEntityId,
+      openClawLegacyConversationAgentId: this._openclawLegacyConversationAgentId,
+      source: source || "text",
+    });
 
     try {
       if (useAssistPipeline) {
