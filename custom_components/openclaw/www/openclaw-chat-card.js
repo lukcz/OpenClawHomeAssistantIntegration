@@ -14,7 +14,7 @@
  * openclaw.send_message service plus openclaw_message_received events.
  */
 
-const CARD_VERSION = "0.3.15";
+const CARD_VERSION = "0.3.16";
 
 // Max time (ms) to show the thinking indicator before falling back to an error (default; overridable via card config `thinking_timeout` in seconds)
 const THINKING_TIMEOUT_MS = 120_000;
