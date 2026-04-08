@@ -178,7 +178,7 @@ Open **Settings → Devices & Services → OpenClaw → Configure**.
 - **Include exposed entities context**
 - **Max context characters**
 - **Context strategy**
-  - `truncate`: keep the first part up to max length
+  - `truncate`: keep the first part up to max length and append a truncation marker
   - `clear`: remove context when it exceeds max length
 
 ### Tool call option
@@ -231,7 +231,8 @@ Fields:
 
 - `message` (required)
 - `session_id` (optional)
-- `attachments` (optional)
+- `config_entry` (optional; target a specific OpenClaw config entry when multiple are configured)
+- `attachments` (optional, currently ignored with a warning; reserved for future attachment support)
 
 Example:
 
@@ -244,11 +245,12 @@ data:
 
 ### `openclaw.clear_history`
 
-Clear stored conversation history for a session.
+Clear locally stored in-memory conversation history for a session.
 
 Fields:
 
 - `session_id` (optional; defaults to `default` session)
+- `config_entry` (optional; clears history only for that OpenClaw config entry)
 
 Example:
 
@@ -271,6 +273,7 @@ Fields:
 - `dry_run` (optional)
 - `message_channel` (optional)
 - `account_id` (optional)
+- `config_entry` (optional; target a specific OpenClaw config entry when multiple are configured)
 
 Example:
 
@@ -295,6 +298,7 @@ Event data includes:
 
 - `message`
 - `session_id`
+- `config_entry`
 - `timestamp`
 
 Automation example:
@@ -320,6 +324,7 @@ Event data includes:
 - `result`
 - `error`
 - `duration_ms`
+- `config_entry`
 - `timestamp`
 
 Automation example:
@@ -398,4 +403,3 @@ MIT. See [LICENSE](LICENSE).
 
 If you find this useful and you want to bring me a coffee to make more nice stuff, or support the project, use the link below:
 - https://revolut.me/vanyo6dhw
-

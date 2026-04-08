@@ -18,6 +18,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    ATTR_CONFIG_ENTRY,
     DOMAIN,
     EVENT_MESSAGE_RECEIVED,
     EVENT_TOOL_INVOKED,
@@ -95,6 +96,8 @@ class OpenClawEventEntity(EventEntity):
         @callback
         def _handle_event(event) -> None:
             data: dict[str, Any] = dict(event.data or {})
+            if data.get(ATTR_CONFIG_ENTRY) != self._entry_id:
+                return
             if key == "message_received":
                 self._trigger_event("message_received", data)
             elif key == "tool_invoked":

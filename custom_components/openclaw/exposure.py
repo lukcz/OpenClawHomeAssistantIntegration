@@ -84,5 +84,5 @@ def apply_context_policy(
     marker = "\n[Context truncated to fit configured max length]\n"
     available = max_chars - len(marker)
     if available <= 0:
-        return context_text[-max_chars:]
-    return marker + context_text[-available:]
+        return context_text[:max_chars]
+    return context_text[:available] + marker

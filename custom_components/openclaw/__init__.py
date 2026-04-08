@@ -32,6 +32,7 @@ from .api import OpenClawApiClient, OpenClawApiError
 from .const import (
     ATTR_AGENT_ID,
     ATTR_ATTACHMENTS,
+    ATTR_CONFIG_ENTRY,
     ATTR_MESSAGE,
     ATTR_MODEL,
     ATTR_OK,
@@ -49,6 +50,7 @@ from .const import (
     ATTR_SOURCE,
     ATTR_TIMESTAMP,
     CONF_ADDON_CONFIG_PATH,
+    CONF_ACTIVE_MODEL,
     CONF_AGENT_ID,
     CONF_VOICE_AGENT_ID,
     CONF_GATEWAY_HOST,
@@ -106,7 +108,7 @@ _CARD_PATH = Path(__file__).parent / "www" / _CARD_FILENAME
 # URL at which the card JS is served (registered via register_static_path)
 _CARD_STATIC_URL = f"/openclaw/{_CARD_FILENAME}"
 # Versioned URL used for Lovelace resource registration to avoid stale browser cache
-_CARD_URL = f"{_CARD_STATIC_URL}?v=0.1.60"
+_CARD_URL = f"{_CARD_STATIC_URL}?v=0.1.61"
 
 OpenClawConfigEntry = ConfigEntry
 
@@ -119,12 +121,14 @@ SEND_MESSAGE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_SESSION_ID): cv.string,
         vol.Optional(ATTR_ATTACHMENTS): vol.All(cv.ensure_list, [cv.string]),
         vol.Optional(ATTR_AGENT_ID): cv.string,
+        vol.Optional(ATTR_CONFIG_ENTRY): cv.string,
     }
 )
 
 CLEAR_HISTORY_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_SESSION_ID): cv.string,
+        vol.Optional(ATTR_CONFIG_ENTRY): cv.string,
     }
 )
 
@@ -137,6 +141,7 @@ INVOKE_TOOL_SCHEMA = vol.Schema(
         vol.Optional(ATTR_DRY_RUN, default=False): cv.boolean,
         vol.Optional(ATTR_MESSAGE_CHANNEL): cv.string,
         vol.Optional(ATTR_ACCOUNT_ID): cv.string,
+        vol.Optional(ATTR_CONFIG_ENTRY): cv.string,
     }
 )
 
@@ -410,23 +415,36 @@ def _async_register_services(hass: HomeAssistant) -> None:
         message: str = call.data[ATTR_MESSAGE]
         source: str | None = call.data.get(ATTR_SOURCE)
         session_id: str = call.data.get(ATTR_SESSION_ID) or "default"
+        config_entry_id: str | None = call.data.get(ATTR_CONFIG_ENTRY)
+        attachments: list[str] = call.data.get(ATTR_ATTACHMENTS) or []
         call_agent_id = _normalize_optional_text(call.data.get(ATTR_AGENT_ID))
         extra_headers = _VOICE_REQUEST_HEADERS if source == "voice" else None
 
-        entry_data = _get_first_entry_data(hass)
+        entry_data = _get_entry_data(hass, config_entry_id)
         if not entry_data:
             _LOGGER.error("No OpenClaw integration configured")
             return
 
         client: OpenClawApiClient = entry_data["client"]
         coordinator: OpenClawCoordinator = entry_data["coordinator"]
+        event_entry_id: str = entry_data["entry_id"]
         options = _get_entry_options(hass, entry_data)
         voice_agent_id = _normalize_optional_text(
             options.get(CONF_VOICE_AGENT_ID, DEFAULT_VOICE_AGENT_ID)
         )
+        selected_model = _normalize_optional_text(options.get(CONF_ACTIVE_MODEL))
+        if selected_model == "unknown":
+            selected_model = None
         resolved_agent_id = call_agent_id
         if resolved_agent_id is None and source == "voice":
             resolved_agent_id = voice_agent_id
+
+        if attachments:
+            _LOGGER.warning(
+                "Attachments were provided to openclaw.send_message but are not yet "
+                "supported by the OpenClaw chat-completions bridge; ignoring %d attachment(s)",
+                len(attachments),
+            )
 
         try:
             include_context = options.get(
@@ -447,11 +465,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
             )
             system_prompt = apply_context_policy(raw_context, max_chars, strategy)
 
-            _append_chat_history(hass, session_id, "user", message)
+            _append_chat_history(hass, event_entry_id, session_id, "user", message)
 
             response = await client.async_send_message(
                 message=message,
                 session_id=session_id,
+                model=selected_model,
                 system_prompt=system_prompt,
                 agent_id=resolved_agent_id,
                 extra_headers=extra_headers,
@@ -467,6 +486,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                             + "\nRespond to the user based on these results."
                         ),
                         session_id=session_id,
+                        model=selected_model,
                         system_prompt=system_prompt,
                         agent_id=resolved_agent_id,
                         extra_headers=extra_headers,
@@ -482,12 +502,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
                     list(response.keys()),
                 )
 
-            _append_chat_history(hass, session_id, "assistant", assistant_message)
+            _append_chat_history(hass, event_entry_id, session_id, "assistant", assistant_message)
             hass.bus.async_fire(
                 EVENT_MESSAGE_RECEIVED,
                 {
                     ATTR_MESSAGE: assistant_message,
                     ATTR_SESSION_ID: session_id,
+                    ATTR_CONFIG_ENTRY: event_entry_id,
                     ATTR_MODEL: model_used,
                     ATTR_TIMESTAMP: datetime.now(timezone.utc).isoformat(),
                 },
@@ -496,12 +517,19 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
         except OpenClawApiError as err:
             _LOGGER.error("Failed to send message to OpenClaw: %s", err)
-            _append_chat_history(hass, session_id, "assistant", f"OpenClaw error: {err}")
+            _append_chat_history(
+                hass,
+                event_entry_id,
+                session_id,
+                "assistant",
+                f"OpenClaw error: {err}",
+            )
             hass.bus.async_fire(
                 EVENT_MESSAGE_RECEIVED,
                 {
                     ATTR_MESSAGE: f"OpenClaw error: {err}",
                     ATTR_SESSION_ID: session_id,
+                    ATTR_CONFIG_ENTRY: event_entry_id,
                     ATTR_MODEL: "unknown",
                     ATTR_TIMESTAMP: datetime.now(timezone.utc).isoformat(),
                 },
@@ -510,10 +538,21 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def handle_clear_history(call: ServiceCall) -> None:
         """Handle the openclaw.clear_history service call."""
         session_id: str | None = call.data.get(ATTR_SESSION_ID)
+        config_entry_id: str | None = call.data.get(ATTR_CONFIG_ENTRY)
         _LOGGER.info("Clear history requested (session=%s)", session_id or "all")
         store = _get_chat_history_store(hass)
+        if config_entry_id:
+            if session_id:
+                store.pop(_history_key(config_entry_id, session_id), None)
+            else:
+                for key in [key for key in store if key.startswith(f"{config_entry_id}:")]:
+                    store.pop(key, None)
+            return
+
         if session_id:
-            store.pop(session_id, None)
+            for key in list(store):
+                if key == session_id or key.endswith(f":{session_id}"):
+                    store.pop(key, None)
         else:
             store.clear()
 
@@ -526,8 +565,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
         dry_run: bool = bool(call.data.get(ATTR_DRY_RUN, False))
         message_channel: str | None = call.data.get(ATTR_MESSAGE_CHANNEL)
         account_id: str | None = call.data.get(ATTR_ACCOUNT_ID)
+        config_entry_id: str | None = call.data.get(ATTR_CONFIG_ENTRY)
 
-        entry_data = _get_first_entry_data(hass)
+        entry_data = _get_entry_data(hass, config_entry_id)
         if not entry_data:
             _LOGGER.error("No OpenClaw integration configured")
             return
@@ -572,6 +612,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             ATTR_TOOL: tool_name,
             ATTR_ACTION: action,
             ATTR_SESSION_KEY: session_key,
+            ATTR_CONFIG_ENTRY: entry_data["entry_id"],
             ATTR_DRY_RUN: dry_run,
             ATTR_OK: ok,
             ATTR_RESULT: result,
@@ -614,6 +655,22 @@ def _get_first_entry_data(hass: HomeAssistant) -> dict[str, Any] | None:
         if isinstance(entry_data, dict) and "client" in entry_data:
             return entry_data
     return None
+
+
+def _get_entry_data(
+    hass: HomeAssistant,
+    config_entry_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Return entry data for a specific config entry, or the first configured one."""
+    domain_data: dict[str, Any] = hass.data.get(DOMAIN, {})
+
+    if config_entry_id:
+        entry_data = domain_data.get(config_entry_id)
+        if isinstance(entry_data, dict) and "client" in entry_data:
+            return entry_data
+        return None
+
+    return _get_first_entry_data(hass)
 
 
 def _get_entry_options(hass: HomeAssistant, entry_data: dict[str, Any]) -> dict[str, Any]:
@@ -800,10 +857,21 @@ def _get_chat_history_store(hass: HomeAssistant) -> dict[str, list[dict[str, str
     return store
 
 
-def _append_chat_history(hass: HomeAssistant, session_id: str, role: str, content: str) -> None:
+def _history_key(entry_id: str, session_id: str) -> str:
+    """Build a namespaced history key for an integration entry + session."""
+    return f"{entry_id}:{session_id}"
+
+
+def _append_chat_history(
+    hass: HomeAssistant,
+    entry_id: str,
+    session_id: str,
+    role: str,
+    content: str,
+) -> None:
     """Append a message to in-memory chat history."""
     store = _get_chat_history_store(hass)
-    history = store.setdefault(session_id, [])
+    history = store.setdefault(_history_key(entry_id, session_id), [])
     history.append(
         {
             "role": role,
@@ -827,6 +895,7 @@ def _async_register_websocket_api(hass: HomeAssistant) -> None:
         {
             vol.Required("type"): f"{DOMAIN}/get_history",
             vol.Optional("session_id"): cv.string,
+            vol.Optional(ATTR_CONFIG_ENTRY): cv.string,
         }
     )
     @callback
@@ -837,7 +906,17 @@ def _async_register_websocket_api(hass: HomeAssistant) -> None:
     ) -> None:
         """Return chat history for a session."""
         session_id = msg.get("session_id") or "default"
-        history = _get_chat_history_store(hass).get(session_id, [])
+        config_entry_id = msg.get(ATTR_CONFIG_ENTRY)
+        store = _get_chat_history_store(hass)
+        history: list[dict[str, Any]] = []
+        if isinstance(config_entry_id, str) and config_entry_id:
+            history = store.get(_history_key(config_entry_id, session_id), [])
+        else:
+            entry_data = _get_first_entry_data(hass)
+            if entry_data:
+                history = store.get(_history_key(entry_data["entry_id"], session_id), [])
+            if not history:
+                history = store.get(session_id, [])
         connection.send_result(msg["id"], {"session_id": session_id, "messages": history})
 
     websocket_api.async_register_command(hass, websocket_get_history)
@@ -880,6 +959,7 @@ def _async_register_websocket_api(hass: HomeAssistant) -> None:
                     CONF_THINKING_TIMEOUT,
                     DEFAULT_THINKING_TIMEOUT,
                 ),
+                CONF_ACTIVE_MODEL: options.get(CONF_ACTIVE_MODEL),
                 "language": hass.config.language,
             },
         )
