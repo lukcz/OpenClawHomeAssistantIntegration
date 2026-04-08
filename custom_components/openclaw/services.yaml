@@ -17,9 +17,15 @@ send_message:
       example: "my-automation-session"
       selector:
         text:
+    config_entry:
+      name: Config Entry
+      description: Optional OpenClaw config entry ID. Useful when multiple OpenClaw integrations are configured.
+      required: false
+      selector:
+        text:
     attachments:
       name: Attachments
-      description: Optional list of file paths to attach to the message.
+      description: Optional list of file paths reserved for future attachment support. Currently ignored with a warning.
       required: false
       selector:
         text:
@@ -36,11 +42,17 @@ send_message:
 
 clear_history:
   name: Clear History
-  description: Clear the conversation history for a session.
+  description: Clear locally stored in-memory conversation history for a session.
   fields:
     session_id:
       name: Session ID
       description: Session ID to clear. If omitted, clears the default session.
+      required: false
+      selector:
+        text:
+    config_entry:
+      name: Config Entry
+      description: Optional OpenClaw config entry ID. Limits the clear operation to one configured integration.
       required: false
       selector:
         text:
@@ -91,6 +103,12 @@ invoke_tool:
     account_id:
       name: Account ID
       description: Optional account hint header for multi-account routing.
+      required: false
+      selector:
+        text:
+    config_entry:
+      name: Config Entry
+      description: Optional OpenClaw config entry ID. Useful when multiple OpenClaw integrations are configured.
       required: false
       selector:
         text:

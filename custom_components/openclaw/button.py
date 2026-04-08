@@ -96,7 +96,9 @@ class OpenClawButton(CoordinatorEntity[OpenClawCoordinator], ButtonEntity):
             store_key = f"{DOMAIN}_chat_history"
             store = self._hass.data.get(store_key)
             if isinstance(store, dict):
-                store.clear()
+                prefix = f"{self._entry.entry_id}:"
+                for history_key in [item for item in store if item.startswith(prefix)]:
+                    store.pop(history_key, None)
             _LOGGER.info("OpenClaw chat history cleared via button")
 
         elif key == "sync_history":

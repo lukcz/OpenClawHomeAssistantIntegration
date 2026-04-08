@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DATA_MODEL, DOMAIN
+from .const import CONF_ACTIVE_MODEL, DATA_MODEL, DOMAIN
 from .coordinator import OpenClawCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ class OpenClawModelSelect(CoordinatorEntity[OpenClawCoordinator], SelectEntity):
         # Initialise from coordinator cache
         models = coordinator.available_models
         self._attr_options = models if models else ["unknown"]
-        current = (coordinator.data or {}).get(DATA_MODEL)
+        current = entry.options.get(CONF_ACTIVE_MODEL) or (coordinator.data or {}).get(DATA_MODEL)
         self._attr_current_option = current if current in self._attr_options else (
             self._attr_options[0] if self._attr_options else None
         )
@@ -83,7 +83,7 @@ class OpenClawModelSelect(CoordinatorEntity[OpenClawCoordinator], SelectEntity):
         models = self.coordinator.available_models
         if models:
             self._attr_options = models
-        current = (self.coordinator.data or {}).get(DATA_MODEL)
+        current = self._entry.options.get(CONF_ACTIVE_MODEL) or (self.coordinator.data or {}).get(DATA_MODEL)
         if current and current in self._attr_options:
             self._attr_current_option = current
         self.async_write_ha_state()
@@ -100,7 +100,7 @@ class OpenClawModelSelect(CoordinatorEntity[OpenClawCoordinator], SelectEntity):
 
         # Store in config entry options so other components can read it
         new_options = dict(self._entry.options)
-        new_options["active_model"] = option
+        new_options[CONF_ACTIVE_MODEL] = option
         self.hass.config_entries.async_update_entry(
             self._entry, options=new_options
         )

@@ -18,10 +18,12 @@ from homeassistant.helpers import intent
 
 from .api import OpenClawApiClient, OpenClawApiError
 from .const import (
+    ATTR_CONFIG_ENTRY,
     ATTR_MESSAGE,
     ATTR_MODEL,
     ATTR_SESSION_ID,
     ATTR_TIMESTAMP,
+    CONF_ACTIVE_MODEL,
     CONF_ASSIST_SESSION_ID,
     CONF_CONTEXT_MAX_CHARS,
     CONF_CONTEXT_STRATEGY,
@@ -121,6 +123,9 @@ class OpenClawConversationAgent(conversation.AbstractConversationAgent):
         voice_agent_id = self._normalize_optional_text(
             options.get(CONF_VOICE_AGENT_ID)
         )
+        selected_model = self._normalize_optional_text(options.get(CONF_ACTIVE_MODEL))
+        if selected_model == "unknown":
+            selected_model = None
         include_context = options.get(
             CONF_INCLUDE_EXPOSED_CONTEXT,
             DEFAULT_INCLUDE_EXPOSED_CONTEXT,
@@ -148,6 +153,7 @@ class OpenClawConversationAgent(conversation.AbstractConversationAgent):
                 message,
                 conversation_id,
                 voice_agent_id,
+                selected_model,
                 system_prompt,
             )
         except OpenClawApiError as err:
@@ -164,6 +170,7 @@ class OpenClawConversationAgent(conversation.AbstractConversationAgent):
                             message,
                             conversation_id,
                             voice_agent_id,
+                            selected_model,
                             system_prompt,
                         )
                     except OpenClawApiError as retry_err:
@@ -188,7 +195,8 @@ class OpenClawConversationAgent(conversation.AbstractConversationAgent):
             {
                 ATTR_MESSAGE: full_response,
                 ATTR_SESSION_ID: conversation_id,
-                ATTR_MODEL: coordinator.data.get(DATA_MODEL) if coordinator.data else None,
+                ATTR_CONFIG_ENTRY: self.entry.entry_id,
+                ATTR_MODEL: selected_model or (coordinator.data.get(DATA_MODEL) if coordinator.data else None),
                 ATTR_TIMESTAMP: datetime.now(timezone.utc).isoformat(),
             },
         )
@@ -240,6 +248,7 @@ class OpenClawConversationAgent(conversation.AbstractConversationAgent):
         message: str,
         conversation_id: str,
         agent_id: str | None = None,
+        model: str | None = None,
         system_prompt: str | None = None,
     ) -> str:
         """Get a response from OpenClaw, trying streaming first."""
@@ -248,6 +257,7 @@ class OpenClawConversationAgent(conversation.AbstractConversationAgent):
         async for chunk in client.async_stream_message(
             message=message,
             session_id=conversation_id,
+            model=model,
             system_prompt=system_prompt,
             agent_id=agent_id,
             extra_headers=_VOICE_REQUEST_HEADERS,
@@ -261,6 +271,7 @@ class OpenClawConversationAgent(conversation.AbstractConversationAgent):
         response = await client.async_send_message(
             message=message,
             session_id=conversation_id,
+            model=model,
             system_prompt=system_prompt,
             agent_id=agent_id,
             extra_headers=_VOICE_REQUEST_HEADERS,
